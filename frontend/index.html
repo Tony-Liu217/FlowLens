@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>FlowLens · 交我 Pay</title>
+  <link rel="icon" href="/assets/brand-icon.png">
+  <link rel="stylesheet" href="/styles/demo.css"><link rel="stylesheet" href="/styles/app.css">
+  <script type="module" src="/js/app.js"></script>
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="brand"><div class="brand-mark"><img src="/assets/brand-icon.png" alt=""></div><div><div class="brand-name">交我 Pay</div><div class="brand-sub">FLOWLENS · 流水透视</div></div></div>
+    <label class="nav-label" for="book-select">我的账本</label><select id="book-select" aria-label="当前账本"><option value="">尚无账本</option></select>
+    <div class="book-actions"><button id="create-book" class="button small">＋ 新建</button><button id="rename-book" class="button small" disabled>重命名</button><button id="delete-book" class="button small" disabled>删除</button></div><button id="recycle-books" class="recycle-link">回收站</button>
+    <div class="nav-label">账单工作台</div>
+    <nav class="nav-list" aria-label="主导航">
+      <button class="nav-button active" data-page="overview">◫　导入概览</button>
+      <button class="nav-button" data-page="records">▤　来源明细</button>
+      <button class="nav-button" data-page="review">✓　读取核验 <span class="nav-count" id="nav-pending">0</span></button>
+    </nav>
+    <div class="sidebar-foot"><strong>你的账单，留在本机</strong><p>导入与核验进度自动保存。<br>先把来源读清楚，再逐步理解支出。</p></div>
+  </aside>
+  <main class="main-shell">
+    <header class="topbar"><div class="page-heading"><h1 id="page-title">账单导入概览</h1><p id="book-caption">从自己的多平台账单开始</p></div><div class="top-actions"><button id="show-guide" class="button">使用引导</button><button id="refresh" class="button">刷新</button><button id="export" class="button primary" disabled>导出有效流水</button></div></header>
+    <div class="content">
+      <div id="notice" class="notice" role="status" hidden></div>
+      <section id="page-overview" class="workspace">
+        <section class="card intro"><div><span class="eyebrow">把分散的账单，放回同一个账本</span><h2>先看清数据，再理解支出</h2><p>支持微信、支付宝及银行账单。逐批追加，保留每次读取与核验的依据。</p></div><div class="phase-label">导入与核验已开放<br><span>个人支出尚未计算</span></div></section>
+        <section class="card"><div class="upload-panel"><div class="drop-zone" id="drop-zone"><h2>导入或追加账单</h2><p>CSV、XLS / XLSX、PDF、PNG / JPEG<br>每批最多 20 个文件，合计不超过 50 MiB</p><button id="choose-files" class="button teal" disabled>选择文件</button><input id="file-input" type="file" multiple accept=".csv,.xls,.xlsx,.pdf,.png,.jpg,.jpeg" hidden><p id="import-hint">先新建一个账本，再选择文件。</p></div><div class="upload-side"><div class="section-kicker">多平台 · 本地读取</div><div class="source-grid"><div class="source-pill source-wechat"><b>微信支付</b>CSV / Excel</div><div class="source-pill source-alipay"><b>支付宝</b>CSV / Excel</div><div class="source-pill wide source-bank"><b>银行账单</b>表格 / 文本 PDF / 本地 OCR</div></div><label class="field">本批名称（可选）<input id="batch-name" maxlength="80" placeholder="例如：9 月银行卡"></label><details><summary>重复文件选项</summary><label class="check"><input id="allow-duplicate" type="checkbox">允许重新读取已导入的文件</label><small>会保留两批数据并参与汇总，不是替换旧批次。</small></details></div></div><div id="job-status" class="job-status" role="status" hidden></div></section>
+        <section class="kpi-grid" aria-label="读取情况">
+          <article class="card kpi"><div class="kpi-label">已读取记录</div><div class="kpi-value" id="kpi-total">—</div><div class="kpi-note">各来源记录，尚未交易去重</div></article>
+          <article class="card kpi accent"><div class="kpi-label">可用记录</div><div class="kpi-value" id="kpi-eligible">—</div><div class="kpi-note">字段可用，不代表已计为消费</div></article>
+          <article class="card kpi"><div class="kpi-label">待核验记录</div><div class="kpi-value" id="kpi-pending">—</div><div class="kpi-note">金额、日期等需要对照来源</div><button id="review-shortcut" class="review-shortcut" disabled>去读取核验 <span aria-hidden="true">↗</span></button></article>
+          <article class="card kpi"><div class="kpi-label">待核验页面</div><div class="kpi-value" id="kpi-pages">—</div><div class="kpi-note">检查笔数与可能遗漏的记录</div></article>
+          <article class="card kpi"><div class="kpi-label">个人基础支出</div><div class="kpi-value not-calculated">尚未计算</div><div class="kpi-note">后续接入去重、转移与回款解释</div></article>
+        </section>
+        <section class="card panel"><div class="block-head"><div><h2>来源流水汇总</h2><p id="coverage">导入后展示来源范围与读取情况。</p></div><span class="status-pill warn">尚未去重</span></div><p class="basis">以下为可用记录的原始收付方向金额，包含不同交易状态。各平台可能描述同一笔付款，不能相加当作个人支出。</p><div id="sources"><div class="empty-state">这里还没有账单。创建账本并导入后，结果会保存在本机。</div></div><p id="currency-note" class="muted" hidden></p></section>
+        <section class="card panel"><div class="block-head"><div><h2>已保存的导入批次</h2><p>追加不覆盖历史；每一批都保留自己的核验记录。</p></div></div><div id="batches" class="batch-list"></div></section>
+      </section>
+      <section id="page-records" class="workspace" hidden>
+        <section class="card panel"><h2>整本来源明细</h2><p class="muted">包含所有导入批次。核验问题与交易性质分开显示，原始记录始终保留。</p><form id="filters" class="filters"><label>搜索<input name="q" placeholder="交易对方、摘要、金额或文件"></label><label>来源<select name="source" id="source-filter"><option value="">所有来源</option></select></label><label>读取状态<select name="status"><option value="">全部记录</option><option value="eligible">可用记录</option><option value="pending">需要核验</option><option value="excluded">已排除</option></select></label><label>开始日期<input name="start" type="date"></label><label>结束日期<input name="end" type="date"></label><button class="button teal" type="submit">筛选</button></form><div class="table-wrap"><table><thead><tr><th>日期 / 来源</th><th>对方 / 摘要</th><th>金额 / 方向</th><th>交易状态</th><th>读取状态</th><th>来源批次</th><th></th></tr></thead><tbody id="records-body"></tbody></table></div><div class="pagination"><span id="records-count"></span><button id="previous" class="button small">上一页</button><button id="next" class="button small">下一页</button></div></section>
+      </section>
+      <section id="page-review" class="workspace" hidden>
+        <section class="card panel"><div class="block-head"><div><h2>只核对需要确认的读取问题</h2><p>对照原字段或原图修正；核验不会替你认定消费、退款或报销。</p></div></div><div class="review-toolbar"><label>当前批次<select id="review-batch"></select></label><button id="add-record" class="button">补录遗漏记录</button><button id="history" class="button">修改历史与撤销</button></div><div id="review-content"></div></section>
+      </section>
+    </div>
+  </main>
+</div>
+<dialog id="guide-dialog" class="guide-dialog" aria-labelledby="guide-title" aria-describedby="guide-description"><div class="guide-emblem" aria-hidden="true">✦</div><p id="guide-step" class="eyebrow"></p><h2 id="guide-title"></h2><p id="guide-description"></p><div class="guide-route" aria-hidden="true"><span>新建账本</span><b>→</b><span>导入账单</span><b>→</b><span>读取核验</span></div><div class="dialog-actions"><button id="guide-skip" class="button">跳过引导</button><button id="guide-next" class="button teal" autofocus></button></div></dialog>
+<dialog id="name-dialog"><form id="name-form"><h2 id="name-title">新建账本</h2><label class="field">账本名称<input id="book-name" required maxlength="80" autocomplete="off"></label><div class="dialog-actions"><button type="button" class="button" data-close>取消</button><button type="submit" class="button teal">保存</button></div></form></dialog>
+<dialog id="detail-dialog" class="wide-dialog"><div class="dialog-head"><div><h2 id="detail-title">查看与核验</h2><p id="detail-location"></p></div><button class="button small" data-close>关闭</button></div><div id="review-sequence" class="review-sequence" hidden><strong id="sequence-position"></strong><label class="check"><input id="auto-next" type="checkbox" checked>保存后自动进入下一条</label></div><div id="detail-evidence"></div><p id="attention-legend" class="attention-legend" hidden><mark>荧光标记</mark>表示有证据需要核对的字段，不代表一定识别错误。保存后重新评估。</p><details id="raw-details"><summary>原始字段与读取说明</summary><div id="detail-raw" class="raw-table"></div></details><details id="reading-notes" class="reading-notes" hidden><summary>其他读取说明</summary><div id="reading-notes-content"></div></details><form id="record-form"><div id="manual-source" class="form-grid" hidden><label>来源文件<select id="manual-file"></select></label><label>原页码（PDF / 图片必填）<input id="manual-page" type="number" min="1" max="300"></label></div><div id="record-fields" class="form-grid"></div><label class="field"><span id="record-note-label">核验依据 / 修改原因（选填）</span><input id="record-note" maxlength="2000" placeholder="记录准确可直接确认；如有修改，也可补充说明"></label><div id="detail-error" class="inline-error" role="alert" hidden></div><div class="dialog-actions"><button id="exclude-record" type="button" class="button">排除非交易行</button><button type="submit" class="button teal" id="save-record">确认并保存</button></div></form></dialog>
+<dialog id="page-dialog" class="wide-dialog"><div class="dialog-head"><h2>核对整页笔数</h2><button class="button small" data-close>关闭</button></div><p id="page-reason"></p><div id="page-evidence"></div><form id="page-form"><label class="field">原页交易总笔数<input id="observed-count" type="number" min="0" required></label><p class="muted">先确认待定记录；若笔数不同，请关闭此窗口补录或排除误识别行。确认零笔表示你已核实本页没有交易。</p><label class="field">核验依据<input id="page-note" required maxlength="2000" placeholder="请说明与原页核对的结果"></label><div id="page-error" class="inline-error" hidden></div><div class="dialog-actions"><button class="button teal" type="submit">保存页核验</button></div></form></dialog>
+<dialog id="history-dialog" class="wide-dialog"><div class="dialog-head"><h2>本批次修改历史</h2><button class="button small" data-close>关闭</button></div><div id="history-content"></div><button id="undo" class="button">撤销最近一次修改</button></dialog>
+<dialog id="export-dialog"><h2>导出有效流水</h2><p id="export-description"></p><p class="muted">JSON 文件包含来源、修订和范围说明。尚未执行交易去重，不是个人支出结论。</p><div class="dialog-actions"><button class="button" data-close>取消</button><button id="download-full" class="button teal">导出完整有效流水</button><button id="download-partial" class="button">仅导出可用部分</button></div></dialog>
+<dialog id="delete-book-dialog" aria-labelledby="delete-book-title"><form id="delete-book-form"><h2 id="delete-book-title">删除账本</h2><p id="delete-book-description"></p><div id="delete-book-error" class="inline-error" role="alert" hidden></div><div class="dialog-actions"><button type="button" class="button" data-close autofocus>取消</button><button id="confirm-delete-book" type="submit" class="button danger">移入回收站</button></div></form></dialog>
+<dialog id="recycle-dialog" aria-labelledby="recycle-title"><div class="dialog-head"><h2 id="recycle-title">账本回收站</h2><button class="button small" data-close>关闭</button></div><div id="recycle-content"></div><div id="recycle-error" class="inline-error" role="alert" hidden></div></dialog>
+<div id="toast" role="status" hidden></div>
+</body></html>
