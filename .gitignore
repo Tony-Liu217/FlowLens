@@ -25,6 +25,10 @@ connection*.json
 /docs/第一阶段交付与验收.md
 /docs/交互细节优化与工行复核原因.md
 /docs/source-manifest.json
+/docs/建行配对数量排查_*.md
+/docs/配对未采用与收支方向排查_*.md
+/docs/达美乐*流水逐层审计_*.md
+/docs/组级去重与缺失时间鲁棒修复方案.md
 /scripts/verify_reading_update.py
 /scripts/browser_real_readonly.cjs
 /scripts/verify_image_inputs.py

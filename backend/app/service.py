@@ -16,6 +16,9 @@ from jiaowopay_review.store import ReviewStore, ReviewError, Conflict
 from jiaowopay_review.catalog import Catalog, name_value
 from jiaowopay_review.bookstore import book_snapshot, export_book
 from .views import overview, records_page
+from analysis.store import AnalysisStore
+from analysis.ai import PairingAI, MODEL, POLICY as AI_POLICY
+from analysis.core import flow_direction, is_refund, rules_need_restart
 
 MAX_UPLOAD = 50 * 1024 * 1024
 
@@ -39,6 +42,80 @@ class App:
         self.job_path = self.root / 'import-task.json'
         self.recover_import()
         self.sync_book()
+        self.analysis_stores = {}
+        self.pairing_ai = PairingAI(self)
+
+    def analysis_store(self, book_id):
+        book=self.catalog.get(book_id)
+        if book['deleted']:raise ReviewError('账本已移入回收站。')
+        if book_id not in self.analysis_stores:
+            self.analysis_stores[book_id]=AnalysisStore(self.root/'books'/book_id/'analysis')
+        return self.analysis_stores[book_id]
+
+    def analysis_data(self, book_id=None):
+        from jiaowopay_review.bookstore import export_book
+        bid=book_id or self.catalog.context()['book_id']
+        if not bid:raise ReviewError('请先选择账本。')
+        return export_book(self.catalog,bid,allow_partial=True)
+
+    def analysis_view(self, params):
+        data=self.analysis_data();store=self.analysis_store(data['book_id']);view=store.view(data)
+        value=lambda key,default='':params.get(key,[default])[0]
+        section=value('section','summary')
+        jobs=self.pairing_ai.jobs(store)
+        # Results only annotate existing candidates with validated enum values.
+        annotations={}
+        for job in reversed(jobs):
+            if job.get('policy')!=AI_POLICY or job.get('fingerprint')!=view['fingerprint']:continue
+            for item in job.get('results',[]):
+                annotations[item['relation_id']]=item
+        def annotated(p):
+            item=annotations.get(p['id'])
+            return {**p,'ai_verdict':item['verdict'] if item and item['dependencies']==p['dependencies'] else None}
+        def brief(t):
+            return {k:t.get(k) for k in ('id','transaction_at','booking_at','counterparty','description','amount','currency','direction','refund','refund_linked','included','source_ids')}
+        if section=='export':return {**view,'ai_jobs':[{k:v for k,v in j.items() if k!='results'} for j in jobs]}
+        if section=='detail':
+            tx=next((t for t in view['transactions'] if t['id']==value('id')),None)
+            if not tx:raise ReviewError('交易已变化，请刷新。')
+            return {'transaction':tx,'relations':[p for p in view['relations'] if set(p['source_ids'])&set(tx['source_ids'])],
+                    'fingerprint':view['fingerprint'],'revision':view['revision']}
+        if section=='history':return {'history':view['history'],'fingerprint':view['fingerprint'],'revision':view['revision']}
+        if section in {'transactions','candidates'}:
+            page=int(value('page','1'));size=int(value('page_size','30'))
+            if page<1 or not 1<=size<=100:raise ReviewError('页码或每页数量无效。')
+            if section=='transactions':
+                q=value('q').casefold();items=[brief(t) for t in view['transactions'] if not q or q in str(t.get('counterparty','')).casefold() or q in str(t.get('description','')).casefold()]
+            else:
+                items=sorted(view['candidates'],key=lambda p:float(p['amount']),reverse=True)
+                if value('show_all')!='true':items=[p for p in items if p['decision'] in {'suggested','stale'}]
+                rows={r['book_record_id']:r for r in data['records']}
+                def source_label(row):
+                    sequence=next((str(f['value']) for f in row.get('source_fields',[]) if f.get('header')=='序号' and f.get('value') not in (None,'')),None)
+                    if sequence:return '原账单序号 '+sequence
+                    return '原文件行 '+str(row['row']) if row.get('row') is not None else '来源记录 '+row['book_record_id'][-8:]
+                items=[{**annotated(p),'records':[{**{k:rows[rid].get(k) for k in ('book_record_id','source','amount','currency','direction','counterparty','description','transaction_at','booking_at','trade_type','raw_status','payment_method','transaction_at_precision','booking_at_precision')},'source_label':source_label(rows[rid]),'effective_direction':flow_direction(rows[rid]),'refund':is_refund(rows[rid])} for rid in p['source_ids']]} for p in items]
+            return {'items':items[(page-1)*size:page*size],'total':len(items),'page':page,'fingerprint':view['fingerprint'],'revision':view['revision']}
+        if section=='privacy':
+            _,candidates,masked=self.pairing_ai.preview(store,data,view)
+            return {'candidates':masked,'count':len(candidates),'model':MODEL,'fingerprint':view['fingerprint'],'revision':view['revision']}
+        return {k:v for k,v in view.items() if k not in {'transactions','relations','candidates','history'}} | {
+            'relation_count':len(view['relations']),'pending_pairs':sum(p['decision']=='suggested' for p in view['candidates']),
+            'ai_configured':bool(self.pairing_ai.key),'ai_model':MODEL,
+            'restart_required':rules_need_restart(),
+            'jobs':[{k:v for k,v in j.items() if k!='results'} for j in jobs]}
+
+    def analysis_action(self,payload,ai=False):
+        with self.lock:
+            self.catalog.check(payload)
+            if self.job['status']=='running':raise Conflict('导入期间暂停配对修改，请等待完成。')
+            data=self.analysis_data();store=self.analysis_store(data['book_id'])
+            if ai:
+                if payload.get('action')=='cancel':return self.pairing_ai.cancel(store,payload.get('job_id'))
+                if payload.get('action')!='start':raise ReviewError('不支持的 AI 操作。')
+                return self.pairing_ai.start(store,data,store.view(data),payload)
+            view=store.apply(data,payload)
+            return {'revision':view['revision'],'fingerprint':view['fingerprint']}
 
     def save_job(self, job):
         temporary = self.job_path.with_suffix('.tmp')

@@ -40,6 +40,14 @@ detail 增加只读 `attention`：`fields` 为标准字段到核对原因数组�
 
 ## 变更边界
 
+### 第二阶段新增接口（2026-10-08）
+
+- `GET /api/analysis`：默认返回整本分析摘要；`section` 可选 `transactions`、`detail`、`candidates`、`history`、`privacy`、`export`。导出为含来源、字段备选值、关系、规则版本及缺口标记的派生结果，不替代有效来源记录导出。
+- `POST /api/analysis/action`：`action` 为 `accept/reject/defer/undo/display`，带账本上下文、`fingerprint`、`expected_revision`、唯一 `request_id`；关系决定追加保存，版本冲突返回冲突，不覆盖原始底稿。
+- `POST /api/analysis/ai`：显式 `start/cancel`；开始需当前指纹、决定版本及本机会话密钥或环境配置。受保护候选分批发送；取消与版本失效均停止采用迟到结果。密钥不持久化。
+
+沿用本机鉴权和账本上下文检查；导入期间暂停配对修改。AI 判断不直接写入金额关系。结果汇总是去重流水收付，不能当作生活支出。
+
 导入和核验核心包名保持不变。新增 `app/service.py` 编排本地任务，`app/server.py` 处理传输，`app/views.py` 提供整本展示模型。第一阶段不依赖 `jiaowopay_reconcile`，不支持 Demo 的 `AnalysisBundle`。
 
 本地文件原文视为数据，前端以安全文本呈现。文件路径与证据访问必须使用现有校验入口，不能让前端提交一个任意磁盘路径后直接读取。

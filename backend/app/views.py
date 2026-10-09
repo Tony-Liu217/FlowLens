@@ -1,5 +1,6 @@
 """Read models: source-record amounts, never personal expenditure inference."""
 from collections import defaultdict
+from jiaowopay_ingest.semantics import searchable
 from decimal import Decimal
 from jiaowopay_review.bookstore import export_book
 from jiaowopay_review.store import ReviewStore, ReviewError
@@ -77,7 +78,7 @@ def records_page(catalog, params):
                 continue
             if value('source') and row.get('source') != value('source'):
                 continue
-            if query and query not in ' '.join(str(row.get(k) or '') for k in ('filename', 'counterparty', 'description', 'amount', 'source_record_id')).casefold():
+            if query and query not in searchable(row):
                 continue
             date = (row.get('transaction_at') or row.get('booking_at') or '')[:10]
             if value('start') and (not date or date < value('start')):

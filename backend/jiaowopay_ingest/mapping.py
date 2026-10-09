@@ -6,6 +6,7 @@ import unicodedata
 from dataclasses import dataclass, field
 
 from .model import Row
+from .profiles import matching_profiles
 
 
 def text(value) -> str:
@@ -82,16 +83,12 @@ def map_header(headers: list) -> tuple[dict, dict]:
 
 
 def _profile(mapping: Mapping) -> Mapping:
-    h = {norm(v) for v in mapping.headers}
-    # Structural variants, no personal names, amounts, account suffixes or dates.
-    if {"交易时间", "交易类型", "商品", "当前状态", "交易单号", "商户单号"} <= h:
-        mapping.profile, mapping.source, mapping.currency = "wechat.export.v1", "微信", "CNY"
-    elif {"交易时间", "交易分类", "对方账号", "商品说明", "交易订单号", "商家订单号"} <= h:
-        mapping.profile, mapping.source, mapping.currency = "alipay.export.v1", "支付宝", "CNY"
-    elif {"序号", "摘要", "币别", "钞汇", "交易日期", "交易金额", "账户余额", "对方账号与户名"} <= h:
-        mapping.profile, mapping.source, mapping.signed = "ccb.account_activity.v1", "建设银行", True
-    elif {"记账日期", "记账时间", "币别", "金额", "余额", "交易名称", "对方账户名", "对方开户行"} <= h:
-        mapping.profile, mapping.source, mapping.signed = "boc.account_activity.v1", "中国银行", True
+    matches = matching_profiles({norm(v) for v in mapping.headers})
+    # Preserve legacy precedence in production until ambiguous-format review ships.
+    if matches:
+        p = matches[0]
+        mapping.profile, mapping.source = p.id, p.label
+        mapping.currency, mapping.signed = p.currency, p.signed
     return mapping
 
 
@@ -129,12 +126,10 @@ def find_header(rows: list[Row]) -> Mapping | None:
 
 def document_profile(mapping: Mapping, document_text: str) -> Mapping:
     """Recognize a bank document heading and table together, never its filename."""
-    headers = {norm(v) for v in mapping.headers}
-    signature = {'序号', '摘要', '交易日期', '交易金额', '账户余额', '交易地点附言', '对方账号与户名'}
-    if (not mapping.confirmed and mapping.profile == 'generic.v1'
-            and signature <= headers
-            and '中国建设银行个人活期账户全部交易明细' in norm(document_text)):
-        mapping.profile, mapping.source, mapping.signed = 'ccb.account_activity.pdf.v1', '建设银行', True
+    matches = matching_profiles({norm(v) for v in mapping.headers}, norm(document_text))
+    if not mapping.confirmed and mapping.profile == 'generic.v1' and matches:
+        p = matches[0]
+        mapping.profile, mapping.source, mapping.signed = p.id, p.label, p.signed
     return mapping
 
 

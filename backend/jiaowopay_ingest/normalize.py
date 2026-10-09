@@ -227,4 +227,6 @@ def normalize(row: Row, mapping: Mapping) -> tuple[dict, list[dict]]:
     result["mapping_method"] = "user_confirmed" if mapping.confirmed else "profile" if mapping.profile != "generic.v1" else "exact_alias"
     result["profile"] = mapping.profile
     result["source"] = mapping.source or "未知来源"
+    from .semantics import enrich
+    enrich(result, mapping.headers, mapping.columns, row.values)
     return result, problems

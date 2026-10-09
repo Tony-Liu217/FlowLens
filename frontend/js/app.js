@@ -1,6 +1,7 @@
 import {request, filePayload} from './api.js';
 import {renderProgress} from './progress.js';
 import {createGuide} from './guide.js';
+import {createAnalysis} from './analysis.js';
 
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
@@ -35,6 +36,7 @@ function setBusy(value) {
   $('#export').disabled = value || !currentBook()?.batch_count;
 }
 function readState(next) {
+  if(state?.book_id!==next.book_id) analysis.reset();
   state = next;
   const book = currentBook();
   $('#book-select').innerHTML = (state.books.filter(b => !b.deleted).map(b => `<option value="${escape(b.id)}">${escape(b.name)}</option>`).join('') || '<option value="">尚无账本</option>');
@@ -62,6 +64,7 @@ async function refresh() {
   overview = await request('/api/overview', {query: context()});
   renderOverview(); renderReview();
   if (activePage === 'records') await renderRecords();
+  if (activePage === 'analysis') await analysis.render();
   if (!busy) guide();
 }
 function renderOverview() {
@@ -88,11 +91,20 @@ async function showPage(name) {
   activePage = name;
   $$('.workspace').forEach(el => el.hidden = el.id !== 'page-'+name);
   $$('[data-page]').forEach(el => {el.classList.toggle('active',el.dataset.page === name);el.setAttribute('aria-current',el.dataset.page === name ? 'page' : 'false');});
-  $('#page-title').textContent = {overview:'账单导入概览',records:'整本来源明细',review:'读取核验'}[name];
+  $('#page-title').textContent = {overview:'账单导入概览',records:'整本来源明细',review:'读取核验',analysis:'去重后流水'}[name];
+  if (name === 'analysis') await analysis.render();
   if (name === 'records') await renderRecords();
   if (name === 'review') renderReview();
 }
 function reviewLabel(row) { return row.review_status === 'excluded' ? '已排除' : row.page_review_pending ? '整页待核验' : row.review_status === 'confirmed' ? '人工已核验' : row.review_status === 'pending' ? '需要核验' : '读取可用'; }
+const contextLabels={memo:'附言 / 备注',payment_method:'支付方式 / 渠道',trade_type:'交易类型',original_category:'来源分类',merchant_order_no:'商家订单号',counterparty_account:'对方账号',counterparty_bank:'对方开户行'};
+function semanticSummary(r) {
+  const party=r.counterparty || r.semantic_hints?.counterparty?.value;
+  const description=r.description || r.semantic_hints?.description?.value;
+  const hint=(!r.counterparty || r.derived_fields?.counterparty) && r.semantic_hints?.counterparty;
+  const extra=Object.entries(contextLabels).filter(([k])=>r[k] && ![party,description,'/','--'].includes(r[k]));
+  return `${escape(party || '—')}${hint?'<small>附言中的对方 / 渠道线索</small>':''}<small>${escape(description || '—')}</small>${extra.length?`<details><summary>更多来源信息</summary>${extra.map(([k,label])=>`<small>${escape(label)}：${escape(r[k])}</small>`).join('')}</details>`:''}${r.unmapped_headers?.length?`<small class="status-pill warn">有未归类信息：${escape(r.unmapped_headers.join('、'))}</small>`:''}`;
+}
 async function renderRecords() {
   const requestId=++recordsRequest;
   const filters = Object.fromEntries(new FormData($('#filters')));
@@ -100,7 +112,7 @@ async function renderRecords() {
   const data = await request('/api/records', {query:{...context(),...filters,page,page_size:50}});
   if(requestId!==recordsRequest) return;
   rows = data.records;
-  $('#records-body').innerHTML = rows.map((r,i)=>`<tr><td>${escape(r.transaction_at || r.booking_at || '日期待定')}<small>${escape(r.source)}</small></td><td>${escape(r.counterparty || '—')}<small>${escape(r.description || '—')}</small></td><td>${escape(money(r.amount,r.currency))}<small>${escape(direction[r.direction] || '方向待定')}</small></td><td>${escape(status[r.transaction_status] || '未知')}</td><td><span class="status-pill ${r.eligible_for_processing ? '' : 'warn'}">${reviewLabel(r)}</span></td><td>${escape(r.batch_name)}<small>${escape(r.filename)}</small></td><td><button class="button small" data-record="${i}">查看 / 核验</button></td></tr>`).join('') || '<tr><td colspan="7" class="empty-state">没有符合条件的记录。</td></tr>';
+  $('#records-body').innerHTML = rows.map((r,i)=>`<tr><td>${escape(r.transaction_at || r.booking_at || '日期待定')}<small>${escape(r.source)}</small></td><td>${semanticSummary(r)}</td><td>${escape(money(r.amount,r.currency))}<small>${escape(direction[r.direction] || '方向待定')}</small></td><td>${escape(status[r.transaction_status] || '未知')}</td><td><span class="status-pill ${r.eligible_for_processing ? '' : 'warn'}">${reviewLabel(r)}</span></td><td>${escape(r.batch_name)}<small>${escape(r.filename)}</small></td><td><button class="button small" data-record="${i}">查看 / 核验</button></td></tr>`).join('') || '<tr><td colspan="7" class="empty-state">没有符合条件的记录。</td></tr>';
   $('#records-count').textContent = `共 ${data.total} 条 · 第 ${page} / ${Math.max(1,Math.ceil(data.total/50))} 页${data.unreadable_batches.length ? ' · 部分批次无法读取' : ''}`;
   $('#previous').disabled = page <= 1; $('#next').disabled = page*50 >= data.total;
 }
@@ -111,7 +123,7 @@ function renderReview() {
   const pending = ledger.records.filter(r=>r.review_status === 'pending');
   const tasks = ledger.tasks.filter(t=>t.scope === 'page' && t.status === 'pending');
   const issues = ledger.blockers.filter(i=>!pending.some(r=>r.record_id===i.record_id) && !tasks.some(t=>t.file_id===i.file_id && t.page===i.page));
-  const receipts = `<details><summary>本批 ${ledger.files.length} 个文件的读取结果</summary>${ledger.files.map(f=>`<p>${escape(f.filename)} · ${escape({completed:'读取完成',partial:'部分读取，需要核验',failed:'读取失败',duplicate_file_skipped:'内容与本批其他文件相同，已跳过'}[f.status] || f.status)}</p>`).join('')}</details>`;
+  const receipts = `<details><summary>本批 ${ledger.files.length} 个文件的读取结果</summary>${ledger.files.map(f=>`<p>${escape(f.filename)} · ${escape({completed:'读取完成',partial:'部分读取，需要核验',failed:'读取失败',duplicate_file_skipped:'内容与本批其他文件相同，已跳过'}[f.status] || f.status)}${(()=>{const names=[...new Set(ledger.records.filter(r=>r.file_id===f.file_id).flatMap(r=>r.unmapped_headers || []))];return names.length?`<small>尚未归类但已保留、可搜索：${escape(names.join('、'))}</small>`:'';})()}</p>`).join('')}</details>`;
   $('#review-content').innerHTML = issues.map(i=>`<div class="issue"><strong>文件读取问题</strong><p>${escape(i.message)}</p><small>${escape(['HEADER_UNRECOGNIZED','UNMAPPED_TEXT','MAPPING_INVALID'].includes(i.code) ? '未识别模板需提供映射或新增适配，不能靠补录少量记录消除整个文件的失败。' : '请对照来源处理相关记录或页面；完整导出前需解决读取缺口。')}</small></div>`).join('') +
     tasks.map(t=>`<div class="review-row"><div><strong>第 ${escape(t.page)} 页：请核对是否漏行</strong><p>${escape(ledger.files.find(f=>f.file_id===t.file_id)?.filename || '')}</p><p>确认本页记录后，再对照原页填写交易总笔数。</p></div><button class="button small" data-page-task="${escape(t.review_id)}">查看原页 / 核对笔数</button></div>`).join('') +
     pending.map(r=>`<div class="review-row"><div><strong>${escape(r.counterparty || r.description || r.filename)}</strong><p>${escape(r.transaction_at || r.booking_at || '日期待定')} · ${escape(money(r.amount,r.currency))} · ${escape(direction[r.direction] || '方向待定')}</p><p>${escape(ledger.issues.filter(i=>i.record_id===r.record_id && i.severity==='error').map(i=>i.message).join('；') || '请对照原始字段或截图核验。')}</p></div><button class="button small" data-review-record="${escape(r.record_id)}">对照并核验</button></div>`).join('') +
@@ -161,8 +173,10 @@ function renderFields(row, attention={}) {
     const hintId='attention-'+key;
     const attrs=reasons.length?` aria-describedby="${hintId}"`:'';
     const content=key==='direction' ? `<select name="${key}"${attrs}><option value="">请选择</option>${Object.entries(direction).map(([v,t])=>`<option value="${v}" ${row[key]===v?'selected':''}>${t}</option>`).join('')}</select>` : key==='transaction_status' ? `<select name="${key}"${attrs}>${Object.entries(status).map(([v,t])=>`<option value="${v}" ${row[key]===v?'selected':''}>${t}</option>`).join('')}</select>` : `<input name="${key}" value="${escape(row[key])}" maxlength="2000"${attrs} ${['amount','currency'].includes(key)?'required':''}>`;
+    const sourceHint=row.derived_fields?.[key] || (!row[key] && row.semantic_hints?.[key]);
+    const sourceNote=sourceHint?`<small>${escape(sourceHint.label)}：${escape(sourceHint.value)}${row.human_confirmed&&!row[key]?'（保留原人工空值，可按需补充）':''}</small>`:'';
     const caption=key==='balance' && row.balance_reliable===false?'余额（仅供参考，可留空）':label;
-    return `<label${reasons.length?' class="field-attention"':''}><span>${reasons.length?`<mark>${caption}</mark>`:caption}</span>${content}${reasons.length?`<small id="${hintId}" class="field-attention-reason">待核对 · ${escape(reasons.join('；'))}</small>`:''}</label>`;
+    return `<label${reasons.length?' class="field-attention"':''}><span>${reasons.length?`<mark>${caption}</mark>`:caption}</span>${content}${sourceNote}${reasons.length?`<small id="${hintId}" class="field-attention-reason">待核对 · ${escape(reasons.join('；'))}</small>`:''}</label>`;
   }).join('');
 }
 async function openRecord(row, continuing=false) {
@@ -184,14 +198,18 @@ async function openRecord(row, continuing=false) {
   const originalValues=detail.raw?.values || [];
   const originalHeaders=detail.original?.raw_headers || [];
   const attention=detail.attention || {};
+  const sourceFields=new Map((detail.record.source_fields || []).map(f=>[f.index,f]));
   const rawAttention=new Map((attention.raw_columns || []).map(item=>[item.index,item]));
   const readable=value=>value && typeof value==='object' ? value.value ?? JSON.stringify(value) : value ?? '（空）';
   const reasons=state.ledger.tasks.filter(t=>t.record_id===row.record_id && t.status!=='resolved_by_policy').flatMap(t=>t.reason_messages || []);
   const notes=state.ledger.issues.filter(i=>i.record_id===row.record_id || i.file_id===detail.record.file_id && !i.record_id);
   $('#detail-raw').innerHTML=(originalValues.length ? `<table><thead><tr><th>原账单字段</th><th>原始内容</th></tr></thead><tbody>${originalValues.map((v,i)=>{
     const concern=rawAttention.get(i), label=escape(originalHeaders[i] || `第 ${i+1} 列`), value=escape(readable(v));
-    return concern?`<tr class="raw-attention" data-raw-index="${i}"><td><mark>${label}</mark><small>待核对</small></td><td><mark>${value}</mark><small class="raw-attention-reason">${escape(concern.reasons.join('；'))}</small></td></tr>`:`<tr><td>${label}</td><td>${value}</td></tr>`;
+    const source=sourceFields.get(i);
+    const coverage=source?.usage==='unmapped'?'尚未归类，原文已保留并可搜索':source?.usage==='retained'?(source.header==='对方账号与户名'?'保留来源信息，不推断身份':'保留原始辅助信息'):source?.targets?.map(k=>Object.fromEntries(fields)[k] || contextLabels[k] || k).join(' / ') || '';
+    return concern?`<tr class="raw-attention" data-raw-index="${i}"><td><mark>${label}</mark><small>待核对</small></td><td><mark>${value}</mark><small class="raw-attention-reason">${escape(concern.reasons.join('；'))}</small></td></tr>`:`<tr><td>${label}<small>${escape(coverage)}</small></td><td>${value}</td></tr>`;
   }).join('')}</tbody></table>` : '<p>此条为手工补录，来源和依据保存在修改历史中。</p>');
+  for(const hint of Object.values(detail.record.semantic_hints || {})) $('#detail-raw').insertAdjacentHTML('beforeend',`<p>${escape(hint.label)}：${escape(hint.value)}<small>来自「${escape(hint.header)}」，保留来源表达；不代表已核实最终交易对象。</small></p>`);
   if(detail.record.balance_reliable===false) $('#detail-raw').insertAdjacentHTML('beforeend','<p>余额识别存在不确定性，保留供参考，不影响收支记录使用，也不作为后续金额校验的可靠依据。</p>');
   if(detail.record.policy_adjustment) $('#detail-raw').insertAdjacentHTML('beforeend','<p>当前读取结果已按新版规则重新评估；原始底稿与人工修改均保留。</p>');
   const readableReason = r => r.replaceAll('amount+direction','金额和收付方向').replaceAll('transaction_at','交易日期').replaceAll('balance','余额').replace('关键字段识别分数低于 0.98','关键字段识别分数未通过门槛（缺失或低于 0.98）');
@@ -360,4 +378,5 @@ $('#undo').addEventListener('click',handle(async()=>{await request('/api/action'
 $('#export').addEventListener('click',()=>{const partial=overview.status==='partial';$('#export-description').textContent=partial?'账本仍有读取缺口，完整导出暂不可用。你可以明确选择仅导出可用部分，文件会保留缺口说明。':'所有批次的读取核验门槛已通过，可以导出完整有效流水。';$('#download-full').disabled=partial;$('#download-partial').hidden=!partial;$('#export-dialog').showModal();});
 $('#download-full').addEventListener('click',handle(()=>download(false)));
 $('#download-partial').addEventListener('click',handle(()=>download(true)));
+const analysis=createAnalysis({context,hasData:()=>Boolean(currentBook()?.batch_count),isActive:()=>activePage==='analysis',toast,openSource:openRecord});
 refresh().catch(error=>{notice(error.message);setBusy(false);});

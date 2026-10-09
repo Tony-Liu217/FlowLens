@@ -93,9 +93,11 @@ class Handler(BaseHTTPRequestHandler):
                 app = self.server.app
                 if url.path == '/api/state':
                     self.send(200, app.snapshot())
-                elif url.path in {'/api/overview', '/api/records'}:
+                elif url.path in {'/api/overview', '/api/records', '/api/analysis'}:
                     app.catalog.check({'book_id': params.get('book_id', [''])[0] or None, 'catalog_revision': int(params.get('catalog_revision', ['-1'])[0])})
-                    self.send(200, app.overview() if url.path == '/api/overview' else app.records(params))
+                    if url.path=='/api/analysis':
+                        self.send(200,app.analysis_view(params),download=params.get('section')==['export'])
+                    else:self.send(200, app.overview() if url.path == '/api/overview' else app.records(params))
                 elif url.path in {'/api/detail', '/api/evidence', '/api/export'}:
                     app.catalog.check({'book_id':params.get('book_id',[''])[0] or None,
                                        'catalog_revision':int(params.get('catalog_revision',['-1'])[0])})
@@ -149,6 +151,8 @@ class Handler(BaseHTTPRequestHandler):
             elif self.path == '/api/action':
                 result = self.server.app.apply(payload)
                 self.send(200, result)
+            elif self.path in {'/api/analysis/action','/api/analysis/ai'}:
+                self.send(200,self.server.app.analysis_action(payload,ai=self.path.endswith('/ai')))
             else:
                 self.send(404, {'error': '路径不存在。'})
         except Conflict as exc:

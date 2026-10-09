@@ -41,6 +41,8 @@ def checked_fields(original, changes):
         if value is not None and (not isinstance(value, str) or len(value) > 2000):
             raise ReviewError('字段必须是长度不超过 2000 的文本或空值。')
         row[key] = value.strip() or None if isinstance(value, str) else value
+        if row[key] != original.get(key):
+            row.get('derived_fields', {}).pop(key, None)
     for field in ('transaction_at', 'booking_at'):
         value, precision = parse_date(row.get(field))
         if row.get(field) and value is None:
@@ -165,7 +167,15 @@ class ReviewStore:
 
     def _rows(self, state):
         rows = {**copy.deepcopy(self.processing_records), **copy.deepcopy(state['manual'])}
-        rows.update(copy.deepcopy(state['overrides']))
+        for rid, override in state['overrides'].items():
+            base = rows.get(rid, {})
+            merged = {**base, **copy.deepcopy(override)}
+            # Source coverage is regenerated; canonical human values (including blanks) win.
+            for key in ('source_fields', 'unmapped_headers', 'semantic_policy', 'semantic_hints'):
+                if key in base:
+                    merged[key] = copy.deepcopy(base[key])
+            merged['derived_fields'] = copy.deepcopy(override.get('derived_fields', {}))
+            rows[rid] = merged
         for rid, row in rows.items():
             page_pending = any(t['scope'] == 'page' and t['file_id'] == row['file_id']
                                and t.get('page') == row.get('page') and t['review_id'] not in state['pages']

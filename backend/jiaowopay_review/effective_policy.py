@@ -10,7 +10,7 @@ from jiaowopay_ingest.review import reason_text
 from jiaowopay_ingest.storage import resolve_evidence
 from jiaowopay_ocr.policy import VERSION as OCR_VERSION, assess, auxiliary
 
-VERSION = 'effective-reading-2026-10-08-v1'
+VERSION = 'effective-reading-2026-10-09-v2'
 
 
 def apply_reading_policy(originals, raw_rows, source_issues, source_tasks, bundle):
@@ -58,6 +58,10 @@ def apply_reading_policy(originals, raw_rows, source_issues, source_tasks, bundl
                         task['reason_messages'] = [reason_text(code) for code in gates]
                         task['policy_version'] = OCR_VERSION
                 updated = True
+        from jiaowopay_ingest.semantics import enrich
+        raw = raw_rows.get(rec.get('raw_id'))
+        if raw:
+            enrich(rec, rec.get('raw_headers', []), rec.get('mapping_columns', {}), raw['values'])
         if updated:
             rec['policy_adjustment'] = {'version':VERSION, 'original_parse_status':original['parse_status'],
                                         'original_direction':original.get('direction'), 'original_profile':original.get('profile'),

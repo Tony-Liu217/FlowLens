@@ -158,6 +158,8 @@ def import_page(dataset, source, file_id, sha, occurrence, page, *, python=None,
                        raw_headers=[original.get('column_labels',{}).get(k,k) for k in raw_keys],
                        extraction_method='local_ocr',ocr_evidence=dict(evidence),ocr_policy=VERSION,
                        ocr_geometry=proposal['source_geometry'],ocr_changes=proposal.get('changes',[]))
+            from .semantics import enrich
+            enrich(rec, rec['raw_headers'], source_columns, raw['values'])
             gate=assess(result,i,rec)
             rec.update(auxiliary(result, i))
             gate += [p['code'] for p in problems if p['severity']=='error']
